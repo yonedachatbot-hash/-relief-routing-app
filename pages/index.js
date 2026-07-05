@@ -19,9 +19,10 @@ export default function Home() {
     phone_number: '',
     origin_address: '',
     destination_address: '',
-    move_date: '',
-    household_size: '',
-    special_notes: '',
+    preferred_date: '',
+    case_type: '',
+    luggage_volume: '',
+    options: '',
   });
   const [aiResult, setAiResult] = useState('');       // AIの推薦テキスト
   const [taskId, setTaskId] = useState('');            // DifyタスクID
@@ -240,7 +241,7 @@ export default function Home() {
     setStep(STEP.INPUT);
     setFormData({
       customer_name: '', phone_number: '', origin_address: '',
-      destination_address: '', move_date: '', household_size: '', special_notes: '',
+      destination_address: '', preferred_date: '', case_type: '', luggage_volume: '', options: '',
     });
     setAiResult('');
     setTaskId('');
@@ -308,26 +309,32 @@ export default function Home() {
                   </FormField>
                   <FormField label="引越し希望日">
                     <input style={styles.input} type="date"
-                      value={formData.move_date}
-                      onChange={e => setFormData(p => ({ ...p, move_date: e.target.value }))} />
+                      value={formData.preferred_date}
+                      onChange={e => setFormData(p => ({ ...p, preferred_date: e.target.value }))} />
                   </FormField>
-                  <FormField label="世帯規模">
+                  <FormField label="引越し種別">
                     <select style={styles.input}
-                      value={formData.household_size}
-                      onChange={e => setFormData(p => ({ ...p, household_size: e.target.value }))}>
+                      value={formData.case_type}
+                      onChange={e => setFormData(p => ({ ...p, case_type: e.target.value }))}>
                       <option value="">選択してください</option>
-                      <option value="単身">単身（1人）</option>
-                      <option value="カップル・夫婦">カップル・夫婦（2人）</option>
-                      <option value="ファミリー（3〜4人）">ファミリー（3〜4人）</option>
-                      <option value="大家族（5人以上）">大家族（5人以上）</option>
+                      <option value="単身引越し（1R〜1LDK）">単身引越し（1R〜1LDK）</option>
+                      <option value="カップル・夫婦引越し（2LDK）">カップル・夫婦引越し（2LDK）</option>
+                      <option value="家族引越し（3LDK）">家族引越し（3LDK）</option>
+                      <option value="大家族引越し（4LDK以上）">大家族引越し（4LDK以上）</option>
                     </select>
                   </FormField>
                 </div>
-                <FormField label="特記事項・備考">
+                <FormField label="荷物量・特記事項">
                   <textarea style={{ ...styles.input, minHeight: '80px', resize: 'vertical' }}
-                    placeholder="例：ピアノあり、大型家具多め、急ぎ対応希望 など"
-                    value={formData.special_notes}
-                    onChange={e => setFormData(p => ({ ...p, special_notes: e.target.value }))} />
+                    placeholder="例：大型家具あり・ピアノあり など"
+                    value={formData.luggage_volume}
+                    onChange={e => setFormData(p => ({ ...p, luggage_volume: e.target.value }))} />
+                </FormField>
+                <FormField label="オプション希望">
+                  <textarea style={{ ...styles.input, minHeight: '60px', resize: 'vertical' }}
+                    placeholder="例：梱包オプション希望、急ぎ対応希望 など"
+                    value={formData.options}
+                    onChange={e => setFormData(p => ({ ...p, options: e.target.value }))} />
                 </FormField>
                 <button type="submit" style={styles.btnPrimary}>
                   🤖 AIに振分けを依頼する
