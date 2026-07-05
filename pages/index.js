@@ -109,25 +109,25 @@ export default function Home() {
         addLog('📋 ワークフロー開始');
         break;
 
-      case 'node_started':
-        if (data?.title) addLog(`⚙️ ${data.title} 処理中...`);
-        break;
-
       case 'node_finished':
         if (data?.title) addLog(`✅ ${data.title} 完了`);
         // LLMノードの出力（AI推薦テキスト）を取得
         if (data?.outputs?.text) {
           setAiResult(data.outputs.text);
         }
-        // 人間の入力ノードが待機状態になったとき
-        if (data?.node_type === 'human-input' || data?.execution_metadata?.node_type === 'human-input') {
+        break;
+
+      // 人間の入力ノードが待機状態になったとき（Difyはnode_startedで通知）
+      case 'node_started':
+        if (data?.title) addLog(`⚙️ ${data.title} 処理中...`);
+        if (data?.node_type === 'human-input') {
           const title = data?.title || '';
-          if (title.includes('担当者') || title.includes('確認')) {
-            addLog('👤 担当者確認を待っています...');
-            setStep(STEP.CONFIRM);
-          } else if (title.includes('電話')) {
+          if (title.includes('電話')) {
             addLog('📞 店舗電話確認を待っています...');
             setStep(STEP.PHONE);
+          } else if (title.includes('担当') || title.includes('確認')) {
+            addLog('👤 担当者確認を待っています...');
+            setStep(STEP.CONFIRM);
           }
         }
         break;
@@ -139,10 +139,9 @@ export default function Home() {
 
       case 'workflow_finished':
         addLog('🏁 ワークフロー完了');
-        if (data?.outputs) {
-          setOutputData(data.outputs);
-          setStep(STEP.DONE);
-        }
+        // outputsが空でも完了画面に遷移する
+        setOutputData(data?.outputs || {});
+        setStep(STEP.DONE);
         break;
 
       case 'error':
