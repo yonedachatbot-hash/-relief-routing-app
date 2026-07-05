@@ -137,6 +137,24 @@ export default function Home() {
         if (data?.text) setAiResult(prev => prev + data.text);
         break;
 
+      case 'workflow_paused':
+        // 人間入力ノードで一時停止（担当者確認 or 電話確認）
+        addLog('⏸ 入力待ち...');
+        if (data?.node_type === 'human-input' || data?.title) {
+          const title = data?.title || '';
+          if (title.includes('電話')) {
+            addLog('📞 店舗電話確認を待っています...');
+            setStep(STEP.PHONE);
+          } else {
+            addLog('👤 担当者確認を待っています...');
+            setStep(STEP.CONFIRM);
+          }
+        } else {
+          // タイトルが不明な場合は担当者確認として扱う
+          setStep(STEP.CONFIRM);
+        }
+        break;
+
       case 'workflow_finished':
         addLog('🏁 ワークフロー完了');
         // outputsが空でも完了画面に遷移する
