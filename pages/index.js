@@ -86,6 +86,8 @@ export default function Home() {
 
         try {
           const event = JSON.parse(jsonStr);
+          // デバッグ: 受信イベント名をコンソールに出力
+          if (event.event) console.log('[Dify event]', event.event, event.data?.title || '');
           handleEvent(event, currentTaskId, (id) => { currentTaskId = id; });
         } catch (_) {
           // JSON解析エラーは無視
@@ -168,6 +170,8 @@ export default function Home() {
         break;
 
       default:
+        // 未知のイベントをログに表示（デバッグ用）
+        addLog(`📡 イベント: ${eventType}`);
         break;
     }
   };
