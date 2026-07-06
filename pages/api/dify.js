@@ -34,7 +34,7 @@ export default async function handler(req, res) {
       };
     } else if (action === 'resume') {
       // 人間の入力ノードへの回答送信（Dify正式エンドポイント）
-      url = `${apiUrl}/workflows/tasks/${taskId}/resume`;
+      url = `${apiUrl}/workflows/tasks/${taskId}/resumptions`;
       body = { inputs: inputs || {}, user: user || 'demo-user' };
     } else {
       return res.status(400).json({ error: '不正なアクションです' });
