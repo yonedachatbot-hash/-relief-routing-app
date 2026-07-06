@@ -60,9 +60,19 @@ export default function Home() {
     const decoder = new TextDecoder();
     let buffer = '';
     let currentTaskId = '';
+    let hasConfirmed = false;
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        // ストリーム終了時にAI結果があれば担当者確認へ
+        if (!hasConfirmed) {
+          setStep(prev => {
+            if (prev === STEP.RUNNING) return STEP.CONFIRM;
+            return prev;
+          });
+        }
+        break;
+      }
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop();
@@ -72,8 +82,8 @@ export default function Home() {
         if (!jsonStr || jsonStr === '[DONE]') continue;
         try {
           const event = JSON.parse(jsonStr);
-          if (event.event) console.log('[Dify event]', event.event, JSON.stringify(event.data));
-          handleEvent(event, currentTaskId, (id) => { currentTaskId = id; });
+          const result = handleEvent(event, currentTaskId, (id) => { currentTaskId = id; });
+          if (result === 'confirmed') hasConfirmed = true;
         } catch (_) {}
       }
     }
@@ -102,16 +112,17 @@ export default function Home() {
       case 'workflow_paused':
         addLog('⏸ 担当者入力待ち...');
         setStep(STEP.CONFIRM);
-        break;
+        return 'confirmed';
       case 'workflow_finished':
         addLog('🏁 ワークフロー完了');
         setOutputData(data?.outputs || {});
-        setStep(STEP.DONE);
-        break;
+        // workflow_finishedが来た場合はAI結果表示後に担当者確認へ
+        setStep(STEP.CONFIRM);
+        return 'confirmed';
       case 'error':
         setErrorMsg(data?.message || '不明なエラー');
         setStep(STEP.ERROR);
-        break;
+        return 'confirmed';
       default:
         break;
     }
@@ -245,7 +256,7 @@ export default function Home() {
               <form onSubmit={handleConfirmSubmit} style={{ marginTop: 20 }}>
                 <FormField label="最終選択店舗を入力してください" required>
                   <input style={styles.input} type="text"
-                    placeholder="例：ST05神戸営業所"
+                    placeholder="例：ST08札幌営業所"
                     value={finalStore}
                     onChange={e => setFinalStore(e.target.value)} required />
                 </FormField>
