@@ -3,16 +3,15 @@ import Head from 'next/head';
 
 // ====== ステップ定義 ======
 const STEP = {
-  INPUT: 'input',        // 顧客情報入力
-  RUNNING: 'running',    // AI分析中
-  CONFIRM: 'confirm',    // 担当者確認（人間入力）
-  PHONE: 'phone',        // 店舗電話確認（人間入力）
-  DONE: 'done',          // 完了
-  ERROR: 'error',        // エラー
+  INPUT: 'input',
+  RUNNING: 'running',
+  CONFIRM: 'confirm',
+  PHONE: 'phone',
+  DONE: 'done',
+  ERROR: 'error',
 };
 
 export default function Home() {
-  // ---- 状態管理 ----
   const [step, setStep] = useState(STEP.INPUT);
   const [formData, setFormData] = useState({
     customer_name: '',
@@ -24,40 +23,33 @@ export default function Home() {
     luggage_volume: '',
     options: '',
   });
-  const [aiResult, setAiResult] = useState('');       // AIの推薦テキスト
-  const [taskId, setTaskId] = useState('');            // DifyタスクID
-  const [finalStore, setFinalStore] = useState('');    // 担当者が選んだ店舗
-  const [phoneResult, setPhoneResult] = useState(''); // 電話確認結果
-  const [outputData, setOutputData] = useState(null); // 最終出力
+  const [aiResult, setAiResult] = useState('');
+  const [taskId, setTaskId] = useState('');
+  const [nodeExecutionId, setNodeExecutionId] = useState('');
+  const [finalStore, setFinalStore] = useState('');
+  const [phoneResult, setPhoneResult] = useState('');
+  const [outputData, setOutputData] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
-  const [logs, setLogs] = useState([]);               // 処理ログ
+  const [logs, setLogs] = useState([]);
 
   const addLog = (msg) => setLogs(prev => [...prev, msg]);
 
-  // ---- ワークフロー開始 ----
   const handleStart = async (e) => {
     e.preventDefault();
     setStep(STEP.RUNNING);
     setLogs([]);
     setAiResult('');
     addLog('🚀 ワークフロー開始中...');
-
     try {
       const res = await fetch('/api/dify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'start',
-          inputs: formData,
-          user: 'operator-001',
-        }),
+        body: JSON.stringify({ action: 'start', inputs: formData, user: 'operator-001' }),
       });
-
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.error || 'APIエラーが発生しました');
       }
-
       await processStream(res.body);
     } catch (err) {
       setErrorMsg(err.message);
@@ -65,125 +57,77 @@ export default function Home() {
     }
   };
 
-  // ---- SSEストリーム処理 ----
   const processStream = async (body) => {
     const reader = body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     let currentTaskId = '';
-
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
-      buffer = lines.pop(); // 未完成の行をバッファに戻す
-
+      buffer = lines.pop();
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         const jsonStr = line.slice(6).trim();
         if (!jsonStr || jsonStr === '[DONE]') continue;
-
         try {
           const event = JSON.parse(jsonStr);
-          // デバッグ: 受信イベント名をコンソールに出力
-          if (event.event) console.log('[Dify event]', event.event, event.data?.title || '');
+          if (event.event) console.log('[Dify event]', event.event, JSON.stringify(event.data));
           handleEvent(event, currentTaskId, (id) => { currentTaskId = id; });
-        } catch (_) {
-          // JSON解析エラーは無視
-        }
+        } catch (_) {}
       }
     }
   };
 
-  // ---- イベントハンドラ ----
   const handleEvent = (event, currentTaskId, setCurrentTaskId) => {
     const { event: eventType, task_id, data } = event;
-
-    // タスクIDを保存
     if (task_id && !currentTaskId) {
       setCurrentTaskId(task_id);
       setTaskId(task_id);
     }
-
     switch (eventType) {
       case 'workflow_started':
         addLog('📋 ワークフロー開始');
         break;
-
       case 'node_finished':
         if (data?.title) addLog(`✅ ${data.title} 完了`);
-        // LLMノードの出力（AI推薦テキスト）を取得
-        if (data?.outputs?.text) {
-          setAiResult(data.outputs.text);
-        }
+        if (data?.outputs?.text) setAiResult(data.outputs.text);
         break;
-
-      // 人間の入力ノードが待機状態になったとき（Difyはnode_startedで通知）
       case 'node_started':
         if (data?.title) addLog(`⚙️ ${data.title} 処理中...`);
-        if (data?.node_type === 'human-input') {
-          const title = data?.title || '';
-          if (title.includes('電話')) {
-            addLog('📞 店舗電話確認を待っています...');
-            setStep(STEP.PHONE);
-          } else if (title.includes('担当') || title.includes('確認')) {
-            addLog('👤 担当者確認を待っています...');
-            setStep(STEP.CONFIRM);
-          }
-        }
         break;
-
       case 'text_chunk':
-        // テキストの逐次表示
         if (data?.text) setAiResult(prev => prev + data.text);
         break;
-
       case 'workflow_paused':
-        // 人間入力ノードで一時停止（担当者確認 or 電話確認）
-        addLog('⏸ 入力待ち...');
-        if (data?.node_type === 'human-input' || data?.title) {
-          const title = data?.title || '';
-          if (title.includes('電話')) {
-            addLog('📞 店舗電話確認を待っています...');
-            setStep(STEP.PHONE);
-          } else {
-            addLog('👤 担当者確認を待っています...');
-            setStep(STEP.CONFIRM);
-          }
-        } else {
-          // タイトルが不明な場合は担当者確認として扱う
-          setStep(STEP.CONFIRM);
-        }
+        console.log('[workflow_paused] data:', JSON.stringify(data));
+        const execId = data?.node_execution_id || data?.id;
+        if (execId) setNodeExecutionId(execId);
+        addLog('⏸ 担当者入力待ち...');
+        setStep(STEP.CONFIRM);
         break;
-
       case 'workflow_finished':
         addLog('🏁 ワークフロー完了');
-        // outputsが空でも完了画面に遷移する
         setOutputData(data?.outputs || {});
         setStep(STEP.DONE);
         break;
-
       case 'error':
         setErrorMsg(data?.message || '不明なエラー');
         setStep(STEP.ERROR);
         break;
-
       default:
-        // 未知のイベントをログに表示（デバッグ用）
         addLog(`📡 イベント: ${eventType}`);
         break;
     }
   };
 
-  // ---- 担当者確認送信 ----
   const handleConfirmSubmit = async (e) => {
     e.preventDefault();
     if (!finalStore.trim()) return;
     addLog(`📝 選択店舗: ${finalStore}`);
     setStep(STEP.RUNNING);
-
     try {
       const res = await fetch('/api/dify', {
         method: 'POST',
@@ -191,15 +135,14 @@ export default function Home() {
         body: JSON.stringify({
           action: 'resume',
           taskId,
+          nodeExecutionId,
           inputs: { final_store: finalStore },
         }),
       });
-
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.error || '送信エラー');
       }
-
       await processStream(res.body);
     } catch (err) {
       setErrorMsg(err.message);
@@ -207,12 +150,10 @@ export default function Home() {
     }
   };
 
-  // ---- 電話確認送信 ----
   const handlePhoneSubmit = async (action) => {
     setPhoneResult(action);
     addLog(`📞 電話確認: ${action === 'approve' ? '対応可' : '対応不可'}`);
     setStep(STEP.RUNNING);
-
     try {
       const res = await fetch('/api/dify', {
         method: 'POST',
@@ -220,15 +161,14 @@ export default function Home() {
         body: JSON.stringify({
           action: 'resume',
           taskId,
+          nodeExecutionId,
           inputs: { _action_id: action },
         }),
       });
-
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.error || '送信エラー');
       }
-
       await processStream(res.body);
     } catch (err) {
       setErrorMsg(err.message);
@@ -236,7 +176,6 @@ export default function Home() {
     }
   };
 
-  // ---- リセット ----
   const handleReset = () => {
     setStep(STEP.INPUT);
     setFormData({
@@ -245,6 +184,7 @@ export default function Home() {
     });
     setAiResult('');
     setTaskId('');
+    setNodeExecutionId('');
     setFinalStore('');
     setPhoneResult('');
     setOutputData(null);
@@ -252,16 +192,13 @@ export default function Home() {
     setLogs([]);
   };
 
-  // ====== UI レンダリング ======
   return (
     <>
       <Head>
         <title>引越し案件振分けAI | リリーフ</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
-
       <div style={styles.wrapper}>
-        {/* ヘッダー */}
         <header style={styles.header}>
           <div style={styles.headerInner}>
             <div style={styles.logo}>
@@ -274,9 +211,7 @@ export default function Home() {
             <div style={styles.badge}>Powered by Dify × Claude</div>
           </div>
         </header>
-
         <main style={styles.main}>
-          {/* 顧客情報入力フォーム */}
           {step === STEP.INPUT && (
             <div style={styles.card}>
               <h2 style={styles.cardTitle}>📋 お客様情報入力</h2>
@@ -286,26 +221,22 @@ export default function Home() {
                   <FormField label="お客様名" required>
                     <input style={styles.input} type="text" placeholder="例：山田 太郎"
                       value={formData.customer_name}
-                      onChange={e => setFormData(p => ({ ...p, customer_name: e.target.value }))}
-                      required />
+                      onChange={e => setFormData(p => ({ ...p, customer_name: e.target.value }))} required />
                   </FormField>
                   <FormField label="電話番号" required>
                     <input style={styles.input} type="tel" placeholder="例：090-1234-5678"
                       value={formData.phone_number}
-                      onChange={e => setFormData(p => ({ ...p, phone_number: e.target.value }))}
-                      required />
+                      onChange={e => setFormData(p => ({ ...p, phone_number: e.target.value }))} required />
                   </FormField>
                   <FormField label="引越し元（出発地）" required>
                     <input style={styles.input} type="text" placeholder="例：東京都新宿区西新宿1-1-1"
                       value={formData.origin_address}
-                      onChange={e => setFormData(p => ({ ...p, origin_address: e.target.value }))}
-                      required />
+                      onChange={e => setFormData(p => ({ ...p, origin_address: e.target.value }))} required />
                   </FormField>
                   <FormField label="引越し先（到着地）" required>
                     <input style={styles.input} type="text" placeholder="例：神奈川県横浜市中区山下町1-1"
                       value={formData.destination_address}
-                      onChange={e => setFormData(p => ({ ...p, destination_address: e.target.value }))}
-                      required />
+                      onChange={e => setFormData(p => ({ ...p, destination_address: e.target.value }))} required />
                   </FormField>
                   <FormField label="引越し希望日">
                     <input style={styles.input} type="date"
@@ -336,14 +267,10 @@ export default function Home() {
                     value={formData.options}
                     onChange={e => setFormData(p => ({ ...p, options: e.target.value }))} />
                 </FormField>
-                <button type="submit" style={styles.btnPrimary}>
-                  🤖 AIに振分けを依頼する
-                </button>
+                <button type="submit" style={styles.btnPrimary}>🤖 AIに振分けを依頼する</button>
               </form>
             </div>
           )}
-
-          {/* AI分析中 */}
           {step === STEP.RUNNING && (
             <div style={styles.card}>
               <div style={styles.loadingCenter}>
@@ -354,8 +281,6 @@ export default function Home() {
               <LogPanel logs={logs} />
             </div>
           )}
-
-          {/* 担当者確認 */}
           {step === STEP.CONFIRM && (
             <div style={styles.card}>
               <h2 style={styles.cardTitle}>👤 担当者確認</h2>
@@ -366,18 +291,15 @@ export default function Home() {
               <form onSubmit={handleConfirmSubmit} style={{ marginTop: 20 }}>
                 <FormField label="最終選択店舗を入力してください" required>
                   <input style={styles.input} type="text"
-                    placeholder="例：ST01東京本店"
+                    placeholder="例：ST05神戸営業所"
                     value={finalStore}
-                    onChange={e => setFinalStore(e.target.value)}
-                    required />
+                    onChange={e => setFinalStore(e.target.value)} required />
                 </FormField>
                 <button type="submit" style={styles.btnPrimary}>確定して次へ →</button>
               </form>
               <LogPanel logs={logs} />
             </div>
           )}
-
-          {/* 店舗電話確認 */}
           {step === STEP.PHONE && (
             <div style={styles.card}>
               <h2 style={styles.cardTitle}>📞 店舗電話確認</h2>
@@ -386,18 +308,12 @@ export default function Home() {
                 対応可否を選択してください。
               </div>
               <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
-                <button style={styles.btnSuccess} onClick={() => handlePhoneSubmit('approve')}>
-                  ✅ 対応可
-                </button>
-                <button style={styles.btnDanger} onClick={() => handlePhoneSubmit('reject')}>
-                  ❌ 対応不可
-                </button>
+                <button style={styles.btnSuccess} onClick={() => handlePhoneSubmit('approve')}>✅ 対応可</button>
+                <button style={styles.btnDanger} onClick={() => handlePhoneSubmit('reject')}>❌ 対応不可</button>
               </div>
               <LogPanel logs={logs} />
             </div>
           )}
-
-          {/* 完了 */}
           {step === STEP.DONE && (
             <div style={styles.card}>
               <div style={styles.doneHeader}>
@@ -423,8 +339,6 @@ export default function Home() {
               <LogPanel logs={logs} />
             </div>
           )}
-
-          {/* エラー */}
           {step === STEP.ERROR && (
             <div style={styles.card}>
               <div style={styles.errorBox}>
@@ -438,7 +352,6 @@ export default function Home() {
             </div>
           )}
         </main>
-
         <footer style={styles.footer}>
           © 2026 リリーフ AI振分けシステム — 内部利用限定デモ
         </footer>
@@ -447,7 +360,6 @@ export default function Home() {
   );
 }
 
-// ---- 共通コンポーネント ----
 function FormField({ label, required, children }) {
   return (
     <div style={{ marginBottom: 16 }}>
@@ -480,198 +392,42 @@ function LogPanel({ logs }) {
   );
 }
 
-// ====== スタイル定義 ======
 const styles = {
-  wrapper: {
-    minHeight: '100vh',
-    display: 'flex',
-    flexDirection: 'column',
-    background: '#f0f4f8',
-  },
-  header: {
-    background: 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)',
-    color: '#fff',
-    padding: '0 24px',
-    boxShadow: '0 2px 8px rgba(0,0,0,.15)',
-  },
-  headerInner: {
-    maxWidth: 800,
-    margin: '0 auto',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '16px 0',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
+  wrapper: { minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#f0f4f8' },
+  header: { background: 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)', color: '#fff', padding: '0 24px', boxShadow: '0 2px 8px rgba(0,0,0,.15)' },
+  headerInner: { maxWidth: 800, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 0', flexWrap: 'wrap', gap: 12 },
   logo: { display: 'flex', alignItems: 'center', gap: 12 },
   logoIcon: { fontSize: 32 },
   logoTitle: { fontSize: 20, fontWeight: 700, letterSpacing: '.5px' },
   logoSub: { fontSize: 12, opacity: .8, marginTop: 2 },
-  badge: {
-    background: 'rgba(255,255,255,.15)',
-    border: '1px solid rgba(255,255,255,.3)',
-    borderRadius: 20,
-    padding: '4px 14px',
-    fontSize: 12,
-    fontWeight: 600,
-  },
-  main: {
-    flex: 1,
-    maxWidth: 800,
-    width: '100%',
-    margin: '32px auto',
-    padding: '0 16px',
-  },
-  card: {
-    background: '#fff',
-    borderRadius: 16,
-    padding: '32px',
-    boxShadow: '0 4px 24px rgba(0,0,0,.08)',
-  },
-  cardTitle: {
-    fontSize: 20,
-    fontWeight: 700,
-    color: '#1e3a8a',
-    marginBottom: 8,
-  },
+  badge: { background: 'rgba(255,255,255,.15)', border: '1px solid rgba(255,255,255,.3)', borderRadius: 20, padding: '4px 14px', fontSize: 12, fontWeight: 600 },
+  main: { flex: 1, maxWidth: 800, width: '100%', margin: '32px auto', padding: '0 16px' },
+  card: { background: '#fff', borderRadius: 16, padding: '32px', boxShadow: '0 4px 24px rgba(0,0,0,.08)' },
+  cardTitle: { fontSize: 20, fontWeight: 700, color: '#1e3a8a', marginBottom: 8 },
   cardDesc: { color: '#6b7280', marginBottom: 24, fontSize: 14 },
   form: {},
-  formGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-    gap: '0 24px',
-  },
-  label: {
-    display: 'block',
-    fontSize: 13,
-    fontWeight: 600,
-    color: '#374151',
-    marginBottom: 6,
-  },
-  input: {
-    width: '100%',
-    padding: '10px 14px',
-    border: '1.5px solid #d1d5db',
-    borderRadius: 8,
-    fontSize: 14,
-    color: '#1f2937',
-    outline: 'none',
-    transition: 'border-color .2s',
-    fontFamily: 'inherit',
-  },
-  btnPrimary: {
-    width: '100%',
-    padding: '14px',
-    background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 10,
-    fontSize: 16,
-    fontWeight: 700,
-    cursor: 'pointer',
-    marginTop: 8,
-    letterSpacing: '.5px',
-  },
-  btnSuccess: {
-    flex: 1,
-    padding: '14px',
-    background: '#16a34a',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 10,
-    fontSize: 15,
-    fontWeight: 700,
-    cursor: 'pointer',
-  },
-  btnDanger: {
-    flex: 1,
-    padding: '14px',
-    background: '#dc2626',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 10,
-    fontSize: 15,
-    fontWeight: 700,
-    cursor: 'pointer',
-  },
+  formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0 24px' },
+  label: { display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 },
+  input: { width: '100%', padding: '10px 14px', border: '1.5px solid #d1d5db', borderRadius: 8, fontSize: 14, color: '#1f2937', outline: 'none', transition: 'border-color .2s', fontFamily: 'inherit' },
+  btnPrimary: { width: '100%', padding: '14px', background: 'linear-gradient(135deg, #2563eb, #1d4ed8)', color: '#fff', border: 'none', borderRadius: 10, fontSize: 16, fontWeight: 700, cursor: 'pointer', marginTop: 8, letterSpacing: '.5px' },
+  btnSuccess: { flex: 1, padding: '14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: 'pointer' },
+  btnDanger: { flex: 1, padding: '14px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: 'pointer' },
   loadingCenter: { textAlign: 'center', padding: '32px 0' },
-  spinner: {
-    width: 48,
-    height: 48,
-    border: '4px solid #e5e7eb',
-    borderTop: '4px solid #2563eb',
-    borderRadius: '50%',
-    margin: '0 auto',
-    animation: 'spin 1s linear infinite',
-  },
-  aiResultBox: {
-    background: '#eff6ff',
-    border: '1.5px solid #bfdbfe',
-    borderRadius: 10,
-    padding: '16px',
-    marginTop: 8,
-  },
+  spinner: { width: 48, height: 48, border: '4px solid #e5e7eb', borderTop: '4px solid #2563eb', borderRadius: '50%', margin: '0 auto', animation: 'spin 1s linear infinite' },
+  aiResultBox: { background: '#eff6ff', border: '1.5px solid #bfdbfe', borderRadius: 10, padding: '16px', marginTop: 8 },
   aiResultLabel: { fontSize: 12, fontWeight: 700, color: '#1d4ed8', marginBottom: 8 },
-  aiResultText: {
-    fontSize: 14,
-    color: '#1e3a8a',
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
-    fontFamily: 'inherit',
-    lineHeight: 1.7,
-  },
-  infoBox: {
-    background: '#fffbeb',
-    border: '1.5px solid #fde68a',
-    borderRadius: 10,
-    padding: '16px',
-    fontSize: 14,
-    lineHeight: 1.7,
-  },
+  aiResultText: { fontSize: 14, color: '#1e3a8a', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', lineHeight: 1.7 },
+  infoBox: { background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: 10, padding: '16px', fontSize: 14, lineHeight: 1.7 },
   doneHeader: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 },
   doneIcon: { fontSize: 36 },
-  resultGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: 12,
-  },
-  resultItem: {
-    background: '#f9fafb',
-    border: '1.5px solid #e5e7eb',
-    borderRadius: 10,
-    padding: '12px 16px',
-  },
-  resultItemHighlight: {
-    background: '#eff6ff',
-    border: '2px solid #2563eb',
-  },
+  resultGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 },
+  resultItem: { background: '#f9fafb', border: '1.5px solid #e5e7eb', borderRadius: 10, padding: '12px 16px' },
+  resultItemHighlight: { background: '#eff6ff', border: '2px solid #2563eb' },
   resultLabel: { fontSize: 11, color: '#6b7280', fontWeight: 600, marginBottom: 4 },
   resultValue: { fontSize: 16, fontWeight: 700, color: '#1e3a8a' },
-  errorBox: {
-    background: '#fef2f2',
-    border: '1.5px solid #fca5a5',
-    borderRadius: 10,
-    padding: '20px',
-    color: '#dc2626',
-  },
-  logPanel: {
-    marginTop: 24,
-    background: '#f8fafc',
-    border: '1px solid #e2e8f0',
-    borderRadius: 8,
-    padding: '12px 16px',
-    maxHeight: 180,
-    overflowY: 'auto',
-  },
+  errorBox: { background: '#fef2f2', border: '1.5px solid #fca5a5', borderRadius: 10, padding: '20px', color: '#dc2626' },
+  logPanel: { marginTop: 24, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '12px 16px', maxHeight: 180, overflowY: 'auto' },
   logTitle: { fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 8 },
   logLine: { fontSize: 12, color: '#475569', lineHeight: 1.8 },
-  footer: {
-    textAlign: 'center',
-    padding: '16px',
-    color: '#9ca3af',
-    fontSize: 12,
-    borderTop: '1px solid #e5e7eb',
-    background: '#fff',
-  },
+  footer: { textAlign: 'center', padding: '16px', color: '#9ca3af', fontSize: 12, borderTop: '1px solid #e5e7eb', background: '#fff' },
 };
