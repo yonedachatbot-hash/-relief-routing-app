@@ -2,7 +2,6 @@
 
 export const config = {
   api: {
-    // ストリーミングレスポンスのためbodyParserを無効化
     bodyParser: true,
     responseLimit: false,
   },
@@ -13,19 +12,18 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { action, taskId, inputs, user } = req.body;
+  const { action, taskId, nodeExecutionId, inputs, user } = req.body;
   const apiKey = process.env.DIFY_API_KEY;
   const apiUrl = process.env.DIFY_API_URL || 'https://api.dify.ai/v1';
 
   if (!apiKey || apiKey.includes('ここに')) {
-    return res.status(500).json({ error: 'APIキーが設定されていません。.env.localを確認してください。' });
+    return res.status(500).json({ error: 'APIキーが設定されていません。' });
   }
 
   try {
     let url, body;
 
     if (action === 'start') {
-      // ワークフロー実行開始
       url = `${apiUrl}/workflows/run`;
       body = {
         inputs: inputs || {},
@@ -33,9 +31,12 @@ export default async function handler(req, res) {
         user: user || 'demo-user',
       };
     } else if (action === 'resume') {
-      // 人間の入力ノードへの回答送信（Dify正式エンドポイント）
-      url = `${apiUrl}/workflows/tasks/${taskId}/resumptions`;
-      body = { inputs: inputs || {}, user: user || 'demo-user' };
+      url = `${apiUrl}/workflows/tasks/${taskId}/node-resumptions`;
+      body = {
+        node_execution_id: nodeExecutionId,
+        inputs: inputs || {},
+        user: user || 'demo-user',
+      };
     } else {
       return res.status(400).json({ error: '不正なアクションです' });
     }
@@ -54,7 +55,6 @@ export default async function handler(req, res) {
       return res.status(difyRes.status).json({ error: errText });
     }
 
-    // SSEストリームをそのままクライアントに転送
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
