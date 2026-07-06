@@ -1,7 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import Head from 'next/head';
 
-// ====== ステップ定義 ======
 const STEP = {
   INPUT: 'input',
   RUNNING: 'running',
@@ -25,7 +24,6 @@ export default function Home() {
   });
   const [aiResult, setAiResult] = useState('');
   const [taskId, setTaskId] = useState('');
-  const [nodeExecutionId, setNodeExecutionId] = useState('');
   const [finalStore, setFinalStore] = useState('');
   const [phoneResult, setPhoneResult] = useState('');
   const [outputData, setOutputData] = useState(null);
@@ -102,9 +100,6 @@ export default function Home() {
         if (data?.text) setAiResult(prev => prev + data.text);
         break;
       case 'workflow_paused':
-        console.log('[workflow_paused] data:', JSON.stringify(data));
-        const execId = data?.node_execution_id || data?.id;
-        if (execId) setNodeExecutionId(execId);
         addLog('⏸ 担当者入力待ち...');
         setStep(STEP.CONFIRM);
         break;
@@ -118,62 +113,22 @@ export default function Home() {
         setStep(STEP.ERROR);
         break;
       default:
-        addLog(`📡 イベント: ${eventType}`);
         break;
     }
   };
 
-  const handleConfirmSubmit = async (e) => {
+  const handleConfirmSubmit = (e) => {
     e.preventDefault();
     if (!finalStore.trim()) return;
     addLog(`📝 選択店舗: ${finalStore}`);
-    setStep(STEP.RUNNING);
-    try {
-      const res = await fetch('/api/dify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'resume',
-          taskId,
-          nodeExecutionId,
-          inputs: { final_store: finalStore },
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || '送信エラー');
-      }
-      await processStream(res.body);
-    } catch (err) {
-      setErrorMsg(err.message);
-      setStep(STEP.ERROR);
-    }
+    setStep(STEP.PHONE);
   };
 
-  const handlePhoneSubmit = async (action) => {
+  const handlePhoneSubmit = (action) => {
     setPhoneResult(action);
     addLog(`📞 電話確認: ${action === 'approve' ? '対応可' : '対応不可'}`);
-    setStep(STEP.RUNNING);
-    try {
-      const res = await fetch('/api/dify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'resume',
-          taskId,
-          nodeExecutionId,
-          inputs: { _action_id: action },
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || '送信エラー');
-      }
-      await processStream(res.body);
-    } catch (err) {
-      setErrorMsg(err.message);
-      setStep(STEP.ERROR);
-    }
+    setOutputData({});
+    setStep(STEP.DONE);
   };
 
   const handleReset = () => {
@@ -184,7 +139,6 @@ export default function Home() {
     });
     setAiResult('');
     setTaskId('');
-    setNodeExecutionId('');
     setFinalStore('');
     setPhoneResult('');
     setOutputData(null);
@@ -216,7 +170,7 @@ export default function Home() {
             <div style={styles.card}>
               <h2 style={styles.cardTitle}>📋 お客様情報入力</h2>
               <p style={styles.cardDesc}>受付した内容を入力してください。AIが最適な担当店舗を推薦します。</p>
-              <form onSubmit={handleStart} style={styles.form}>
+              <form onSubmit={handleStart}>
                 <div style={styles.formGrid}>
                   <FormField label="お客様名" required>
                     <input style={styles.input} type="text" placeholder="例：山田 太郎"
@@ -321,7 +275,7 @@ export default function Home() {
                 <h2 style={styles.cardTitle}>振分け完了！</h2>
               </div>
               <div style={styles.resultGrid}>
-                <ResultItem label="担当店舗" value={outputData?.selected_store || finalStore} highlight />
+                <ResultItem label="担当店舗" value={finalStore} highlight />
                 <ResultItem label="電話確認結果" value={phoneResult === 'approve' ? '対応可' : phoneResult === 'reject' ? '対応不可' : '-'} />
                 <ResultItem label="お客様名" value={formData.customer_name} />
                 <ResultItem label="引越し元" value={formData.origin_address} />
@@ -405,7 +359,6 @@ const styles = {
   card: { background: '#fff', borderRadius: 16, padding: '32px', boxShadow: '0 4px 24px rgba(0,0,0,.08)' },
   cardTitle: { fontSize: 20, fontWeight: 700, color: '#1e3a8a', marginBottom: 8 },
   cardDesc: { color: '#6b7280', marginBottom: 24, fontSize: 14 },
-  form: {},
   formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0 24px' },
   label: { display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 },
   input: { width: '100%', padding: '10px 14px', border: '1.5px solid #d1d5db', borderRadius: 8, fontSize: 14, color: '#1f2937', outline: 'none', transition: 'border-color .2s', fontFamily: 'inherit' },
